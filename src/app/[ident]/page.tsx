@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Window, WindowContent, WindowHeader } from "react95";
+import { TransactionView } from "@/components/transaction/transaction-view";
 import { ProfilePanel } from "@/components/profile/profile-panel";
 import { AppPanel } from "@/components/app-panel/app-panel";
 import { AppHeader } from "@/components/ui/app-header";
@@ -90,12 +91,7 @@ export default function IdentPage() {
       return <DbRootMatch dbroot={resolved.dbroot} hint={resolved.hint} />;
 
     case "tx":
-      return (
-        <MessageWindow
-          title="tx signature — coming soon"
-          body="Transaction views are on the way. For now, look up wallets directly by address."
-        />
-      );
+      return <TransactionView signature={resolved.signature} />;
 
     case "not-found":
       return <MessageWindow title="404" body={`Nothing found for ${ident}.`} color="#b00020" />;
