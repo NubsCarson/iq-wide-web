@@ -17,6 +17,8 @@ import {
   WindowContent,
   GroupBox,
 } from "react95";
+import { PayloadView } from "@/components/transaction/payload-view";
+import { readCodeInGW } from "@/lib/gateway/reader";
 import { gwFetch } from "@/lib/gateway/reader";
 import { resolveDbRootLabel } from "@/lib/dbroot/known-labels";
 import { resolveDAppLink } from "@/lib/dbroot/dapp-links";
@@ -165,27 +167,12 @@ type GatewayRow = Record<string, unknown> & {
   __blockTime?: number;
 };
 
-interface DataPayload {
-  data?: string;
-  metadata?: string;
-  signature?: string;
-}
-
 async function fetchRows(tablePda: string): Promise<GatewayRow[]> {
   // limit=50: the gateway head-page caches 50 anyway, and we never need more
   // than a screenful here. Bigger limits cost a real cold fetch.
   const res = await gwFetch(`/table/${tablePda}/rows?limit=50`);
   const data = await res.json();
   return Array.isArray(data?.rows) ? data.rows : [];
-}
-
-async function fetchDataPayload(sig: string): Promise<DataPayload | null> {
-  try {
-    const res = await gwFetch(`/data/${sig}`);
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 // Try to pick a single-line summary for a row before it's expanded — the
@@ -214,163 +201,6 @@ const codeBlockStyle: React.CSSProperties = {
   wordBreak: "break-all",
 };
 
-// The IQLabs console look — mirrors the gateway's /render SVG (Win95 green-on-
-// black CRT) but as a styled <pre> so it works for text *and* JSON. Used as the
-// PayloadView fallback whenever the bytes aren't an image.
-const IQ_GREEN = "#41FF00";
-const IQ_GREEN_DARK = "#006400";
-const consoleShellStyle: React.CSSProperties = {
-  background: "#c0c0c0",
-  border: "2px solid #c0c0c0",
-  borderTopColor: "#dfdfdf",
-  borderLeftColor: "#dfdfdf",
-  borderBottomColor: "#404040",
-  borderRightColor: "#404040",
-  margin: "4px 0",
-  minWidth: 0,
-};
-const consoleTitleBarStyle: React.CSSProperties = {
-  background: `linear-gradient(to right, #000 0%, ${IQ_GREEN_DARK} 100%)`,
-  color: IQ_GREEN,
-  fontFamily: "'DejaVu Sans Mono', ui-monospace, monospace",
-  fontWeight: "bold",
-  fontSize: 13,
-  padding: "4px 8px",
-  textShadow: `0 0 4px ${IQ_GREEN}`,
-};
-const consoleBodyStyle: React.CSSProperties = {
-  background: "#0a0a0a",
-  color: IQ_GREEN,
-  fontFamily: "'DejaVu Sans Mono', ui-monospace, monospace",
-  fontSize: 13,
-  lineHeight: 1.5,
-  padding: 12,
-  margin: 0,
-  maxHeight: 320,
-  overflow: "auto",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-all",
-  textShadow: `0 0 3px ${IQ_GREEN}`,
-  backgroundImage:
-    "repeating-linear-gradient(to bottom, transparent 0 1px, rgba(65,255,0,0.04) 1px 2px, transparent 2px 4px)",
-};
-const consoleFooterStyle: React.CSSProperties = {
-  background: "#c0c0c0",
-  color: "#000",
-  fontFamily: "'DejaVu Sans Mono', ui-monospace, monospace",
-  fontSize: 11,
-  padding: "3px 8px",
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 8,
-};
-
-function ConsoleView({
-  title,
-  body,
-  download,
-}: {
-  title: string;
-  body: string;
-  download?: { href: string; filename: string };
-}) {
-  return (
-    <div style={consoleShellStyle}>
-      <div style={consoleTitleBarStyle}>IQLabs — {title}</div>
-      <pre style={consoleBodyStyle}>{body}</pre>
-      <div style={consoleFooterStyle}>
-        <span>inscribed on solana via iqlabs</span>
-        {download && (
-          <a href={download.href} download={download.filename} style={{ color: "#000", textDecoration: "underline" }}>
-            download
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// /data/{sig} returns the metadata field as a JSON-stringified string. Parse
-// loosely so a malformed metadata doesn't break the whole render.
-function parseMeta(metadata?: string): { filetype?: string; filename?: string } {
-  if (!metadata) return {};
-  try {
-    return JSON.parse(metadata) as { filetype?: string; filename?: string };
-  } catch {
-    return {};
-  }
-}
-
-// codein writers often record filetype as "application/octet-stream" and leave
-// the real hint in filename — so we infer from the extension when filetype is
-// unhelpful. The browser is the viewer; the gateway just hands us the bytes.
-const EXT_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  json: "application/json",
-  txt: "text/plain",
-  md: "text/plain",
-  pdf: "application/pdf",
-};
-
-// Hints come from a few places: metadata.filetype, metadata.filename, and
-// sometimes a bare `ext` on the row itself. Walk them in that order.
-function effectiveMime(filetype: string, filename?: string, ext?: string): string {
-  if (filetype && filetype !== "application/octet-stream") return filetype;
-  const fromName = filename?.split(".").pop()?.toLowerCase();
-  const hint = (fromName || ext?.toLowerCase().replace(/^\./, "")) ?? "";
-  return EXT_MIME[hint] || filetype || "application/octet-stream";
-}
-
-/** Render `/data/{sig}` content in-browser using a data: URI inferred from the
- *  metadata (filetype + filename extension, or a row-level `ext`). Images go
- *  inline; everything else falls into a Win95-CRT console box that mirrors the
- *  gateway /render look. No gateway redirects — bytes here, view here. */
-function PayloadView({ payload, ext }: { payload: DataPayload; ext?: string }) {
-  const meta = parseMeta(payload.metadata);
-  const raw = payload.data ?? "";
-  const mime = effectiveMime(meta.filetype ?? "", meta.filename, ext);
-  const title = meta.filename ?? mime;
-
-  if (mime.startsWith("image/")) {
-    return (
-      <img
-        src={`data:${mime};base64,${raw}`}
-        alt={meta.filename ?? "image"}
-        style={{ maxWidth: "100%", maxHeight: 320, display: "block", marginTop: 4 }}
-      />
-    );
-  }
-
-  if (mime === "application/json") {
-    let pretty = raw;
-    try {
-      pretty = JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      // not valid JSON; show raw
-    }
-    return <ConsoleView title={title} body={pretty} />;
-  }
-
-  if (mime.startsWith("text/")) {
-    return <ConsoleView title={title} body={raw} />;
-  }
-
-  // Unknown / binary — show a short notice in the console, plus a download.
-  return (
-    <ConsoleView
-      title={title}
-      body={`(binary — ${mime})\n${raw.length} bytes encoded`}
-      download={{ href: `data:${mime};base64,${raw}`, filename: meta.filename ?? "download" }}
-    />
-  );
-}
-
 function ExpandedRow({
   row,
   dbrootLabel: rootLabel,
@@ -394,7 +224,7 @@ function ExpandedRow({
   const dataSig = assetSig ?? (onChainPath.length > 0 ? txSig : undefined);
   const payload = useQuery({
     queryKey: ["data", dataSig],
-    queryFn: () => fetchDataPayload(dataSig!),
+    queryFn: () => readCodeInGW(dataSig!),
     enabled: !!dataSig,
     // /data/{sig} is immutable (sig is content), so cache for the session.
     staleTime: Infinity,
@@ -432,7 +262,8 @@ function ExpandedRow({
         <div style={{ marginTop: 8 }}>
           <strong style={{ fontSize: FONT.body }}>payload</strong>
           {payload.isLoading && <div>loading…</div>}
-          {payload.data && <PayloadView payload={payload.data} ext={ext} />}
+          {payload.isError && <div role="alert">Could not load this file. <button onClick={() => payload.refetch()}>Retry</button></div>}
+          {payload.data && <PayloadView key={dataSig} payload={payload.data} ext={ext} />}
         </div>
       )}
     </div>
