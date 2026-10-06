@@ -10,7 +10,7 @@ Base: `7ccc26d`. Local, read-only tests; no inscriptions or wallet transactions 
 - Chrome download: `frog.txt`, 802 bytes, exact match to decoded gateway response.
 - Error/empty/raster-image states are implemented but do not yet have separate live browser fixtures in this evidence set.
 
-The baseline lockfile fails `npm ci` with missing bufferutil, utf-8-validate and node-gyp-build entries. Local verification used `npm install --ignore-scripts --package-lock=false`; the lockfile remains unchanged.
+The missing optional peer lock entries have been repaired. Clean `npm ci --ignore-scripts` succeeds using the committed lockfile. Tests use the `tsx` loader so the command also works on the Docker-declared Node 20 runtime. The earlier Node 24 screenshot/download receipts above remain historical; this follow-up adds Node 20 test coverage.
 
 ![Desktop](frog-desktop.png)
 ![Mobile](frog-mobile.png)
